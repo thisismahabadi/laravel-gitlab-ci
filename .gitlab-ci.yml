@@ -1,0 +1,55 @@
+default:
+  image: lorisleiva/laravel-docker:latest
+  cache:
+    paths:
+      - vendor/
+      - node_modules/
+
+stages:
+  - test
+  - deploy
+
+variables:
+  GIT_STRATEGY: fetch
+  GIT_DEPTH: "2"
+
+.branches:
+  only:
+    - master
+
+test:
+  services:
+    - mysql:5.7
+  variables:
+    MYSQL_ROOT_PASSWORD: secret
+    MYSQL_DATABASE: project_name
+  extends:
+    - .branches
+  script:
+    - composer install
+    - cp .env.testing .env
+    - php artisan key:generate
+    - php artisan config:cache
+    - php artisan migrate --seed
+    - npm install
+    - npm run production
+    - phpunit --coverage-text --colors=never
+  coverage: '/^\s*Lines:\s*\d+.\d+\%/'
+
+.init_ssh: &init_ssh
+  - eval $(ssh-agent -s)
+  - echo "$SSH_PRIVATE_KEY" | tr -d '\r' | ssh-add - > /dev/null
+  - mkdir -p ~/.ssh
+  - chmod 700 ~/.ssh
+  - '[[ -f /.dockerenv ]] && echo -e "Host *\n\tStrictHostKeyChecking no\n\n" > ~/.ssh/config'
+
+deploy:
+  stage: deploy
+  extends:
+    - .branches
+  script:
+    - *init_ssh
+    - php artisan deploy "$HOST_SERVER"
+  environment:
+    name: production
+    url: "$HOST_URL"
